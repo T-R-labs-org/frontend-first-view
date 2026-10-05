@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/michealtestimony046-glitch/frontend-first-view/compare/v0.12.0...v0.12.1) (2026-09-18)
+
+
+### Bug Fixes
+
+* poll background dry run verification ([46896d2](https://github.com/michealtestimony046-glitch/frontend-first-view/commit/46896d250ff79bcd7fc65a8daee5286388fd2289))
+
 ## [0.12.0](https://github.com/michealtestimony046-glitch/frontend-first-view/compare/v0.11.0...v0.12.0) (2026-09-18)
 
 
