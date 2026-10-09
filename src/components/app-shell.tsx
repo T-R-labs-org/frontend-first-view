@@ -33,16 +33,17 @@ import {
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Logo, MatrixMark } from "./logo";
 import { useAuth } from "@/lib/auth-context";
-import { organizationsApi, notificationsApi, type Organization } from "@/lib/api-client";
+import { organizationsApi, notificationsApi } from "@/lib/api-client";
+import { useLivePortfolio } from "@/lib/live-data";
 import { MiaGuide } from "./mia-guide";
 import { DISCORD_SUPPORT_URL } from "@/lib/support";
-import { OrganizationBalanceCard, ORGANIZATION_CHANGED_EVENT } from "./organization-balance-card";
+import { OrganizationBalanceCard } from "./organization-balance-card";
 
 type NavItem = { label: string; to: string; icon: typeof LayoutDashboard; exact?: boolean };
 const nav: NavItem[] = [
   { label: "Overview", to: "/app", icon: LayoutDashboard, exact: true },
   { label: "Projects", to: "/app/projects", icon: FolderKanban },
-  { label: "Secrets & environments", to: "/app/environments", icon: Database },
+  { label: "Environments & data", to: "/app/environments", icon: Database },
   { label: "Discovery", to: "/app/discovery", icon: Search },
   { label: "Worker health", to: "/app/workforce", icon: Users },
   { label: "Test Runs", to: "/app/runs", icon: ListChecks },
@@ -61,7 +62,6 @@ const mobileTabs: NavItem[] = [
   { label: "Discovery", to: "/app/discovery", icon: Search },
   { label: "Runs", to: "/app/runs", icon: ListChecks },
 ];
-const ACTIVE_ORG_KEY = "matrix_qa_active_organization";
 
 function useIsActive() {
   const { pathname } = useLocation();
@@ -300,49 +300,25 @@ function useClickAway<T extends HTMLElement>(open: boolean, onClose: () => void)
 }
 
 function WorkspaceSwitcher() {
-  const { isAuthenticated, user } = useAuth();
+  const { user } = useAuth();
+  const live = useLivePortfolio();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(() =>
-    typeof window === "undefined" ? null : localStorage.getItem(ACTIVE_ORG_KEY),
-  );
-  const [loading, setLoading] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const ref = useClickAway<HTMLDivElement>(open, () => setOpen(false));
+  const activeOrganization = live.activeOrganization;
+  const activeWorkspace = live.activeWorkspace;
+  const activeProject = live.activeProject;
+  const ownsOrganization = live.organizations.some((organization) => organization.ownerId === user?.id);
+  const filteredOrganizations = live.organizations.filter((organization) => organization.name.toLowerCase().includes(q.toLowerCase()));
 
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    setLoading(true);
-    organizationsApi
-      .list()
-      .then((items) => {
-        setOrganizations(items);
-        const stored = typeof window !== "undefined" ? localStorage.getItem(ACTIVE_ORG_KEY) : null;
-        const selected = items.find((o) => o.id === stored) ?? items[0];
-        if (selected) {
-          setActiveId(selected.id);
-          localStorage.setItem(ACTIVE_ORG_KEY, selected.id);
-          window.dispatchEvent(new Event(ORGANIZATION_CHANGED_EVENT));
-        }
-      })
-      .catch((e) => setError(e instanceof Error ? e.message : "Unable to load organizations."))
-      .finally(() => setLoading(false));
-  }, [isAuthenticated]);
-
-  const active = organizations.find((o) => o.id === activeId) ?? organizations[0] ?? null;
-  const ownsOrganization = organizations.some((organization) => organization.ownerId === user?.id);
-  const filtered = organizations.filter((o) => o.name.toLowerCase().includes(q.toLowerCase()));
-
-  const createWorkspace = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const createOrganization = async (event: React.FormEvent) => {
+    event.preventDefault();
     if (ownsOrganization) {
-      setError(
-        "Alpha accounts currently support one organization. Use your existing organization for now.",
-      );
+      setError("The current account can use its existing organization only.");
       setShowCreate(false);
       return;
     }
@@ -351,16 +327,16 @@ function WorkspaceSwitcher() {
     setCreating(true);
     setError(null);
     try {
-      const org = await organizationsApi.create({ name: trimmed });
-      setOrganizations((current) => [...current, org]);
-      setActiveId(org.id);
-      localStorage.setItem(ACTIVE_ORG_KEY, org.id);
-      window.dispatchEvent(new Event(ORGANIZATION_CHANGED_EVENT));
+      const organization = await organizationsApi.create({ name: trimmed });
+      localStorage.setItem("matrix_qa_active_organization", organization.id);
+      localStorage.removeItem("matrix_qa_active_workspace");
+      localStorage.removeItem("matrix_qa_active_project");
+      live.refresh();
       setName("");
       setShowCreate(false);
       setOpen(false);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Unable to create workspace.");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to create organization.");
     } finally {
       setCreating(false);
     }
@@ -368,138 +344,24 @@ function WorkspaceSwitcher() {
 
   return (
     <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between rounded-md border border-border bg-surface-2/60 px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
-      >
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-gradient-to-br from-primary to-primary/40 font-mono text-[10px] font-bold text-primary-foreground">
-            {active ? active.name.slice(0, 2).toUpperCase() : "M"}
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm">{active?.name ?? "Create workspace"}</span>
-            <span className="block truncate font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
-              {active ? "OWNER · ACTIVE" : "GET STARTED"}
-            </span>
-          </span>
+      <button onClick={() => setOpen((value) => !value)} aria-expanded={open} className="flex w-full min-w-0 items-center justify-between rounded-md border border-border bg-surface-2/60 px-3 py-2 text-left text-sm transition-colors hover:bg-accent">
+        <span className="min-w-0">
+          <span className="block truncate text-sm">{activeOrganization?.name ?? "Select organization"}</span>
+          <span className="block truncate font-mono text-[9px] uppercase tracking-wider text-muted-foreground">{activeWorkspace?.name ?? "Select workspace"}{activeProject ? ` · ${activeProject.name}` : ""}</span>
         </span>
-        {open ? (
-          <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-        )}
+        {open ? <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />}
       </button>
       {open && (
-        <div className="absolute left-0 right-0 top-full z-40 mt-2 overflow-hidden rounded-md border border-border bg-popover shadow-2xl">
-          {organizations.length > 0 && (
-            <div className="border-b border-border p-2">
-              <div className="flex items-center gap-2 rounded-md border border-border bg-surface-2/60 px-2 py-1.5">
-                <Search className="h-3.5 w-3.5 text-muted-foreground" />
-                <input
-                  autoFocus
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder="Search workspaces…"
-                  className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground"
-                />
-              </div>
-            </div>
-          )}
-          <ul className="max-h-56 overflow-y-auto p-1">
-            {loading && (
-              <li className="flex items-center gap-2 px-3 py-4 text-xs text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Loading workspaces…
-              </li>
-            )}
-            {!loading &&
-              filtered.map((w) => (
-                <li key={w.id}>
-                  <button
-                    onClick={() => {
-                      setActiveId(w.id);
-                      localStorage.setItem(ACTIVE_ORG_KEY, w.id);
-                      window.dispatchEvent(new Event(ORGANIZATION_CHANGED_EVENT));
-                      setOpen(false);
-                    }}
-                    className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${w.id === active?.id ? "bg-primary/10 text-foreground" : "hover:bg-accent"}`}
-                  >
-                    <span className="flex h-5 w-5 items-center justify-center rounded bg-gradient-to-br from-primary to-primary/40 font-mono text-[9px] font-bold text-primary-foreground">
-                      {w.name.slice(0, 2).toUpperCase()}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate">{w.name}</span>
-                    {w.id === active?.id && <Check className="h-3.5 w-3.5 text-primary" />}
-                  </button>
-                </li>
-              ))}
-            {!loading && filtered.length === 0 && (
-              <li className="px-2 py-3 text-center text-xs text-muted-foreground">
-                No workspaces yet
-              </li>
-            )}
-          </ul>
-          {error && (
-            <p className="border-t border-border px-3 py-2 text-[11px] text-destructive">{error}</p>
-          )}
-          <div className="border-t border-border p-1">
-            {!showCreate ? (
-              ownsOrganization ? (
-                <p className="px-2 py-2 text-[11px] leading-5 text-muted-foreground">
-                  The private alpha currently supports one organization per account. Use the
-                  existing organization for now.
-                </p>
-              ) : (
-                <button
-                  onClick={() => {
-                    setShowCreate(true);
-                    setError(null);
-                  }}
-                  className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs text-primary hover:bg-accent"
-                >
-                  <PlusCircle className="h-3.5 w-3.5" />
-                  Create new organization
-                </button>
-              )
-            ) : (
-              <form onSubmit={createWorkspace} className="p-2">
-                <label className="mb-1.5 block font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
-                  Organization name
-                </label>
-                <input
-                  autoFocus
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Acme QA Organization"
-                  maxLength={80}
-                  className="mb-2 w-full rounded-md border border-border bg-surface-2 px-2.5 py-2 text-sm outline-none focus:border-primary"
-                />
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowCreate(false)}
-                    className="flex-1 rounded-md border border-border px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={creating || !name.trim()}
-                    className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-primary px-2 py-1.5 text-xs font-semibold text-primary-foreground disabled:opacity-50"
-                  >
-                    {creating && <Loader2 className="h-3.5 w-3.5 animate-spin" />}Create
-                  </button>
-                </div>
-              </form>
-            )}
-            <Link
-              to="/app/settings"
-              onClick={() => setOpen(false)}
-              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-            >
-              <Cog className="h-3.5 w-3.5" />
-              Organization & workspaces
-            </Link>
-          </div>
+        <div className="absolute left-0 right-0 top-full z-40 mt-2 max-h-[min(80vh,30rem)] overflow-y-auto rounded-md border border-border bg-popover shadow-2xl">
+          <div className="border-b border-border p-2"><div className="flex items-center gap-2 rounded-md border border-border bg-surface-2/60 px-2 py-1.5"><Search className="h-3.5 w-3.5 text-muted-foreground" /><input autoFocus value={q} onChange={(event) => setQ(event.target.value)} placeholder="Search organizations…" className="w-full bg-transparent text-xs outline-none placeholder:text-muted-foreground" /></div></div>
+          <div className="px-3 pt-3 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Organizations</div>
+          <ul className="p-1">{filteredOrganizations.map((organization) => <li key={organization.id}><button onClick={() => { live.setActiveOrganization(organization.id); setOpen(false); }} className={`flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm ${organization.id === activeOrganization?.id ? "bg-primary/10 text-foreground" : "hover:bg-accent"}`}><span className="min-w-0 flex-1 truncate">{organization.name}</span>{organization.id === activeOrganization?.id && <Check className="h-3.5 w-3.5 text-primary" />}</button></li>)}</ul>
+          <div className="border-t border-border px-3 pt-3 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Workspaces</div>
+          <ul className="p-1">{live.workspaces.map((workspace) => <li key={workspace.id}><button onClick={() => { live.setActiveWorkspace(workspace.id); setOpen(false); }} className={`flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm ${workspace.id === activeWorkspace?.id ? "bg-primary/10 text-foreground" : "hover:bg-accent"}`}><span className="min-w-0 flex-1 truncate">{workspace.name}</span>{workspace.id === activeWorkspace?.id && <Check className="h-3.5 w-3.5 text-primary" />}</button></li>)}{live.workspaces.length === 0 && <li className="px-2 py-2 text-xs text-muted-foreground">Loading workspaces…</li>}</ul>
+          <div className="border-t border-border px-3 pt-3 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Projects</div>
+          <ul className="p-1">{live.projects.map((project) => <li key={project.id}><button onClick={() => { live.setActiveProject(project.id); setOpen(false); }} className={`flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm ${project.id === activeProject?.id ? "bg-primary/10 text-foreground" : "hover:bg-accent"}`}><span className="min-w-0 flex-1 truncate">{project.name}</span>{project.id === activeProject?.id && <Check className="h-3.5 w-3.5 text-primary" />}</button></li>)}{live.projects.length === 0 && <li className="px-2 py-2 text-xs text-muted-foreground">Loading projects…</li>}</ul>
+          {error && <p className="border-t border-border px-3 py-2 text-[11px] text-destructive">{error}</p>}
+          <div className="border-t border-border p-1">{!showCreate ? <button onClick={() => { setShowCreate(true); setError(null); }} className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs text-primary hover:bg-accent"><PlusCircle className="h-3.5 w-3.5" /> Create new organization</button> : <form onSubmit={createOrganization} className="p-2"><label className="mb-1.5 block font-mono text-[9px] uppercase tracking-wider text-muted-foreground">Organization name</label><input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Acme QA Organization" maxLength={80} className="mb-2 w-full rounded-md border border-border bg-surface-2 px-2.5 py-2 text-sm outline-none focus:border-primary" /><div className="flex gap-2"><button type="button" onClick={() => setShowCreate(false)} className="flex-1 rounded-md border border-border px-2 py-1.5 text-xs text-muted-foreground hover:bg-accent">Cancel</button><button type="submit" disabled={creating || !name.trim()} className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-primary px-2 py-1.5 text-xs font-semibold text-primary-foreground disabled:opacity-50">{creating && <Loader2 className="h-3.5 w-3.5 animate-spin" />}Create</button></div></form>}<Link to="/app/settings/organization" onClick={() => setOpen(false)} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"><Cog className="h-3.5 w-3.5" /> Organization & workspaces</Link></div>
         </div>
       )}
     </div>

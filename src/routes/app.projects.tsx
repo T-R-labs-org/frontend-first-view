@@ -9,6 +9,7 @@ import {
   type Project,
   type Workspace,
 } from "@/lib/api-client";
+import { useLivePortfolio } from "@/lib/live-data";
 
 const ACTIVE_ORG_KEY = "matrix_qa_active_organization";
 const ACTIVE_WORKSPACE_KEY = "matrix_qa_active_workspace";
@@ -22,6 +23,7 @@ export const Route = createFileRoute("/app/projects")({
 });
 
 function ProjectsPage() {
+  const live = useLivePortfolio();
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -109,6 +111,11 @@ function ProjectsPage() {
     };
   }, [organizationId, workspaceId]);
 
+  useEffect(() => {
+    if (live.activeOrganization?.id && live.activeOrganization.id !== organizationId) setOrganizationId(live.activeOrganization.id);
+    if (live.activeWorkspace?.id && live.activeWorkspace.id !== workspaceId) setWorkspaceId(live.activeWorkspace.id);
+  }, [live.activeOrganization?.id, live.activeWorkspace?.id, organizationId, workspaceId]);
+
   const activeOrganization = organizations.find((item) => item.id === organizationId);
   const activeWorkspace = workspaces.find((item) => item.id === workspaceId);
 
@@ -122,6 +129,7 @@ function ProjectsPage() {
       setWorkspaces((current) => [created, ...current]);
       setWorkspaceId(created.id);
       localStorage.setItem(ACTIVE_WORKSPACE_KEY, created.id);
+      live.refresh();
       setWorkspaceName("");
     } catch (cause) {
       setError(toMessage(cause, "Unable to create workspace."));
@@ -132,9 +140,7 @@ function ProjectsPage() {
 
   const handleOrganizationChange = (value: string) => {
     setOrganizationId(value);
-    localStorage.setItem(ACTIVE_ORG_KEY, value);
-    localStorage.removeItem(ACTIVE_WORKSPACE_KEY);
-    localStorage.removeItem(ACTIVE_PROJECT_KEY);
+    live.setActiveOrganization(value);
   };
 
   const projectCountLabel = useMemo(
@@ -190,7 +196,7 @@ function ProjectsPage() {
             value={workspaceId ?? ""}
             onChange={(event) => {
               setWorkspaceId(event.target.value);
-              localStorage.setItem(ACTIVE_WORKSPACE_KEY, event.target.value);
+              live.setActiveWorkspace(event.target.value);
             }}
             disabled={!organizationId || workspaces.length === 0}
             className="mt-1.5 w-full rounded-md border border-border bg-surface-2/40 px-3 py-2 text-sm text-foreground outline-none focus:border-primary"

@@ -23,6 +23,7 @@ import {
   type ScenarioCatalogItem,
   type ScenarioStep,
 } from "@/lib/api-client";
+import { useLivePortfolio } from "@/lib/live-data";
 
 const ACTIVE_ORG_KEY = "matrix_qa_active_organization";
 const ACTIVE_WORKSPACE_KEY = "matrix_qa_active_workspace";
@@ -92,6 +93,7 @@ function isScenarioStepList(value: unknown): value is ScenarioStep[] {
 }
 
 export function ScenarioCatalogPage() {
+  const live = useLivePortfolio();
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
   const [items, setItems] = useState<ScenarioCatalogItem[]>([]);
@@ -134,6 +136,11 @@ export function ScenarioCatalogPage() {
       cancelled = true;
     };
   }, []);
+  useEffect(() => {
+    if (live.projects.length === 0) return;
+    setProjects(live.projects);
+    if (live.activeProject?.id && live.activeProject.id !== projectId) setProjectId(live.activeProject.id);
+  }, [live.projects, live.activeProject?.id, projectId]);
   const load = useCallback(async () => {
     if (!projectId) {
       setItems([]);
@@ -185,10 +192,7 @@ export function ScenarioCatalogPage() {
         <label className="text-xs font-semibold text-muted-foreground">Project</label>
         <select
           value={projectId}
-          onChange={(event) => {
-            setProjectId(event.target.value);
-            localStorage.setItem(ACTIVE_PROJECT_KEY, event.target.value);
-          }}
+          onChange={(event) => live.setActiveProject(event.target.value)}
           className="rounded-md border border-border bg-surface-2 px-3 py-2 text-sm"
         >
           {projects.length === 0 && <option value="">No projects available</option>}
@@ -214,7 +218,7 @@ export function ScenarioCatalogPage() {
           {error}
         </p>
       )}
-      <div className="mt-6 overflow-hidden rounded-md border border-border bg-surface/40">
+      <div className="mt-6 max-w-full overflow-x-auto rounded-md border border-border bg-surface/40">
         {loading || dataLoading ? (
           <div className="flex items-center justify-center gap-2 p-12 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -232,7 +236,7 @@ export function ScenarioCatalogPage() {
             </p>
           </div>
         ) : (
-          <table className="w-full text-left text-sm">
+          <table className="min-w-[720px] w-full text-left text-sm">
             <thead className="border-b border-border bg-surface-2/40 text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
                 <th className="px-4 py-3">Name</th>

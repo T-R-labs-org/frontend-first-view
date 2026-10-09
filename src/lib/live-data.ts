@@ -14,6 +14,7 @@ import {
 export const ACTIVE_ORG_KEY = "matrix_qa_active_organization";
 export const ACTIVE_WORKSPACE_KEY = "matrix_qa_active_workspace";
 export const ACTIVE_PROJECT_KEY = "matrix_qa_active_project";
+export const SCOPE_CHANGED_EVENT = "matrix_qa_scope_changed";
 
 export interface LiveRun extends RunListItem {
   project: Project;
@@ -58,6 +59,8 @@ export interface LivePortfolio {
   activeOrganization: Organization | null;
   activeWorkspace: Workspace | null;
   activeProject: Project | null;
+  setActiveOrganization: (organizationId: string) => void;
+  setActiveWorkspace: (workspaceId: string) => void;
   setActiveProject: (projectId: string) => void;
   loading: boolean;
   error: string | null;
@@ -217,7 +220,7 @@ export const deriveAuditEntries = (runs: LiveRun[], reports: RunReport[]): LiveA
 
 export function useLivePortfolio(): LivePortfolio {
   const [reloadKey, setReloadKey] = useState(0);
-  const [state, setState] = useState<Omit<LivePortfolio, "refresh" | "setActiveProject">>({
+  const [state, setState] = useState<Omit<LivePortfolio, "refresh" | "setActiveOrganization" | "setActiveWorkspace" | "setActiveProject">>({
     organizations: [],
     workspaces: [],
     projects: [],
@@ -326,14 +329,67 @@ export function useLivePortfolio(): LivePortfolio {
     };
   }, [reloadKey]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleScopeChange = () => setReloadKey((key) => key + 1);
+    window.addEventListener(SCOPE_CHANGED_EVENT, handleScopeChange);
+    return () => window.removeEventListener(SCOPE_CHANGED_EVENT, handleScopeChange);
+  }, []);
+
+  const clearScopeData = () => {
+    setState((current) => ({
+      ...current,
+      workspaces: [],
+      projects: [],
+      runs: [],
+      reports: [],
+      issues: [],
+      auditEntries: [],
+      loading: true,
+      error: null,
+    }));
+    if (typeof window !== "undefined") window.dispatchEvent(new Event(SCOPE_CHANGED_EVENT));
+    else setReloadKey((key) => key + 1);
+  };
+
+  const setActiveOrganization = (organizationId: string) => {
+    const organization = state.organizations.find((item) => item.id === organizationId);
+    if (!organization || organization.id === state.activeOrganization?.id) return;
+    if (typeof window !== "undefined") {
+      localStorage.setItem(ACTIVE_ORG_KEY, organization.id);
+      localStorage.removeItem(ACTIVE_WORKSPACE_KEY);
+      localStorage.removeItem(ACTIVE_PROJECT_KEY);
+    }
+    setState((current) => ({
+      ...current,
+      activeOrganization: organization,
+      activeWorkspace: null,
+      activeProject: null,
+    }));
+    clearScopeData();
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("matrix-qa-organization-changed"));
+  };
+
+  const setActiveWorkspace = (workspaceId: string) => {
+    const workspace = state.workspaces.find((item) => item.id === workspaceId);
+    if (!workspace || workspace.id === state.activeWorkspace?.id) return;
+    if (typeof window !== "undefined") {
+      localStorage.setItem(ACTIVE_WORKSPACE_KEY, workspace.id);
+      localStorage.removeItem(ACTIVE_PROJECT_KEY);
+    }
+    setState((current) => ({ ...current, activeWorkspace: workspace, activeProject: null }));
+    clearScopeData();
+  };
+
   const setActiveProject = (projectId: string) => {
     const project = state.projects.find((item) => item.id === projectId) ?? null;
     if (!project) return;
     if (typeof window !== "undefined") window.localStorage.setItem(ACTIVE_PROJECT_KEY, project.id);
     setState((current) => ({ ...current, activeProject: project }));
+    if (typeof window !== "undefined") window.dispatchEvent(new Event(SCOPE_CHANGED_EVENT));
   };
   return useMemo(
-    () => ({ ...state, setActiveProject, refresh: () => setReloadKey((key) => key + 1) }),
+    () => ({ ...state, setActiveOrganization, setActiveWorkspace, setActiveProject, refresh: () => setReloadKey((key) => key + 1) }),
     [state],
   );
 }
