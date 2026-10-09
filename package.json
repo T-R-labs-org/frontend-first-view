@@ -13,7 +13,8 @@
     "format": "prettier --write .",
     "verify:brand": "node scripts/verify-matrixqa-brand-assets.mjs",
     "test:screenshot-evidence": "node --experimental-strip-types scripts/test-screenshot-evidence.mjs",
-    "smoke:ci": "node scripts/ci-public-smoke.mjs"
+    "smoke:ci": "node scripts/ci-public-smoke.mjs",
+    "test:repair-package": "node --experimental-strip-types scripts/test-repair-package.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
