@@ -17,6 +17,9 @@ jobs:
     name: frontend-validation
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -46,6 +49,9 @@ jobs:
 
       - name: Test screenshot evidence presentation states
         run: pnpm test:screenshot-evidence 2>&1 | tee screenshot-evidence-test.log
+
+      - name: Test repair package export
+        run: pnpm test:repair-package 2>&1 | tee repair-package-test.log
 
       - name: Report lint baseline without blocking delivery
         continue-on-error: true
@@ -84,5 +90,6 @@ jobs:
             frontend-build.log
             frontend-brand.log
             screenshot-evidence-test.log
+            repair-package-test.log
             frontend-lint.log
             frontend-preview.log

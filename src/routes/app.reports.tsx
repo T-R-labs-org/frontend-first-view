@@ -5,6 +5,7 @@ import { formatLiveDate, formatLiveDuration, reportForRun, runNumber, useLivePor
 import { videoEvidenceEnabled } from "@/lib/feature-flags";
 import { IssueDetailView } from "@/components/issue-detail-view";
 import { normalizeReport, type ReportIssue } from "@/lib/report-model";
+import { buildRepairPackage, repairPackageFilename, type RepairPackageTarget } from "@/lib/repair-package";
 
 export const Route = createFileRoute("/app/reports")({
   head: () => ({ meta: [{ title: "Reports · Matrix QA" }, { name: "robots", content: "noindex" }] }),
@@ -16,7 +17,7 @@ function ReportsPage() {
   const terminalRuns = live.runs.filter((run) => ["COMPLETED", "PASSED_WITH_FINDINGS", "PARTIALLY_TESTED", "BLOCKED", "FAILED"].includes(run.status));
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedIssue, setSelectedIssue] = useState<ReportIssue | null>(null);
-  const [target, setTarget] = useState<"Cursor" | "Claude Code" | "GitHub" | "Raw">("Raw");
+  const [target, setTarget] = useState<RepairPackageTarget>("Raw");
   const selectedRun = terminalRuns.find((run) => run.id === selectedRunId) ?? terminalRuns[0] ?? null;
   const report = reportForRun(live.reports, selectedRun?.id);
   const videoStatus = videoEvidenceEnabled ? report?.artifactStatus?.video?.status ?? (report?.finalVideo || report?.rawVideo ? "ready" : "not_available") : "disabled";
@@ -29,8 +30,51 @@ function ReportsPage() {
   const quickScanFindings = (report?.quickScanHandoff?.findings ?? []).filter((finding) => finding.status === "QUICK_SCAN_CONFIRMED" || (finding.status === "CONFIRMED" && finding.reportSection !== "VISUAL_INTERACTIVE_FINDINGS"));
   const visualFindings = Array.isArray(report?.aiOverview?.findings) ? report.aiOverview.findings : [];
   const repairMarkdown = report && selectedRun
-    ? `# Matrix QA report ${runNumber(live.runs, selectedRun.id)}\n\nStatus: ${report.status}\nTarget: ${selectedRun.targetUrl}\nStarted: ${formatLiveDate(selectedRun.startedAt ?? selectedRun.createdAt)}\nDuration: ${formatLiveDuration(report.durationSec)}\n\n## Quick Scan / DOM Findings\n${quickScanFindings.length ? quickScanFindings.map((finding) => `- [${finding.status}] ${finding.title}: ${finding.evidence}`).join("\n") : "No confirmed deterministic DOM findings were recorded."}\n\n## Visual & Interactive Findings\n${visualFindings.length ? visualFindings.map((finding) => `- [${String((finding as Record<string, unknown>).severity ?? "unknown").toUpperCase()}] ${String((finding as Record<string, unknown>).title ?? "Untitled finding")}`).join("\n") : "No Chromium-confirmed visual or interactive findings were recorded."}\n\n## Backend Findings\n${findings.length ? findings.map((issue) => `- [${issue.severity.toUpperCase()}] ${issue.title} (${issue.category})`).join("\n") : "No hard findings were returned by the backend."}\n\n## Backend diagnostic\n${report.errorMessage ?? "None"}\n`
+    ? buildRepairPackage({
+        target,
+        runLabel: runNumber(live.runs, selectedRun.id),
+        status: report.status,
+        targetUrl: selectedRun.targetUrl,
+        startedAt: formatLiveDate(selectedRun.startedAt ?? selectedRun.createdAt),
+        duration: formatLiveDuration(report.durationSec),
+        quickScanFindings: quickScanFindings.map((finding) => ({
+          title: finding.title,
+          status: finding.status,
+          evidence: finding.evidence,
+        })),
+        visualFindings: visualFindings.map((finding) => {
+          const item = finding as Record<string, unknown>;
+          return {
+            title: String(item.title ?? "Untitled finding"),
+            severity: String(item.severity ?? "unknown"),
+            summary: typeof item.explanation === "string" ? item.explanation : undefined,
+            evidence: typeof item.evidence === "string" ? item.evidence : undefined,
+          };
+        }),
+        backendFindings: (normalized?.issues ?? []).map((issue) => ({
+          title: issue.title,
+          severity: issue.severity,
+          category: issue.category,
+          summary: issue.summary,
+          scope: issue.scope,
+          remediation: issue.remediation,
+        })),
+        diagnostic: report.errorMessage,
+      })
     : "No terminal report is available yet.";
+
+  const downloadRepairPackage = () => {
+    if (!report || !selectedRun || typeof window === "undefined") return;
+    const blob = new Blob([repairMarkdown], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = repairPackageFilename(runNumber(live.runs, selectedRun.id), target);
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
   const scoreTone = confidenceScore >= 90 ? "text-success" : confidenceScore >= 75 ? "text-warning" : "text-destructive";
 
   return (
@@ -103,6 +147,7 @@ function ReportsPage() {
                   <pre className="max-h-[360px] overflow-auto whitespace-pre-wrap px-5 py-4 font-mono text-[11px] leading-relaxed">{repairMarkdown}</pre>
                   <div className="flex flex-wrap items-center gap-2 border-t border-border bg-surface-2/40 px-5 py-3">
                     <button onClick={() => navigator.clipboard?.writeText(repairMarkdown)} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground"><Copy className="h-3.5 w-3.5" /> Copy markdown</button>
+                    <button onClick={downloadRepairPackage} className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-semibold"><Download className="h-3.5 w-3.5" /> Download repair package</button>
                     {!videoEvidenceEnabled && <span className="text-[11px] text-muted-foreground">Screenshot-first evidence · screenshots and report retained</span>}
                     {videoEvidenceEnabled && videoStatus !== "ready" && videoStatus !== "raw_only" && <span className="text-[11px] text-warning">Video unavailable; run evidence is still retained</span>}
                     {typeof report.reportUrl === "string" && report.reportUrl && <a href={report.reportUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-primary"><Download className="h-3 w-3" /> report.md</a>}
@@ -114,7 +159,7 @@ function ReportsPage() {
           )}
         </>
       )}
-      <p className="mt-6 text-[11px] text-muted-foreground">This page reads live run/report data; export automation remains a later product capability.</p>
+      <p className="mt-6 text-[11px] text-muted-foreground">Repair packages are generated from the selected terminal run and can be copied or downloaded for the chosen handoff target.</p>
       {selectedIssue && <IssueDetailView issue={selectedIssue} onClose={() => setSelectedIssue(null)} />}
     </div>
   );
