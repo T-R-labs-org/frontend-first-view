@@ -24,6 +24,12 @@ import {
   type ScenarioStep,
 } from "@/lib/api-client";
 import { useLivePortfolio } from "@/lib/live-data";
+import {
+  parseSelectorEditor,
+  serializeSelectorEditor,
+  type SelectorEditorState,
+  type SelectorEditorType,
+} from "@/lib/scenario-selector-editor";
 
 const ACTIVE_ORG_KEY = "matrix_qa_active_organization";
 const ACTIVE_WORKSPACE_KEY = "matrix_qa_active_workspace";
@@ -57,33 +63,13 @@ const toMessage = (cause: unknown, fallback: string) =>
   cause instanceof Error ? cause.message : fallback;
 const DYNAMIC_VARIABLES = ["{{DYNAMIC_EMAIL}}", "{{DYNAMIC_FIRST_NAME}}", "{{DYNAMIC_LAST_NAME}}"];
 const SECRET_TOKEN_PATTERN = /\{\{(SECRET_[A-Z0-9_]+)\}\}/g;
-type SelectorType = "text" | "role" | "css" | "label" | "placeholder";
-const selectorTypeLabels: Record<SelectorType, string> = {
+const selectorTypeLabels: Record<SelectorEditorType, string> = {
   text: "Text",
   role: "Role",
   css: "CSS",
   label: "Label",
   placeholder: "Placeholder",
 };
-
-function selectorTypeFromValue(value: string): SelectorType {
-  const prefix = value.match(/^(text|role|css|label|placeholder)=/i)?.[1]?.toLowerCase();
-  return prefix && prefix in selectorTypeLabels
-    ? (prefix as SelectorType)
-    : value.trim()
-      ? "css"
-      : "text";
-}
-
-function selectorValueFromValue(value: string): string {
-  return /^(?:text|role|css|label|placeholder)=/i.test(value)
-    ? value.slice(value.indexOf("=") + 1)
-    : value;
-}
-
-function formatSelector(type: SelectorType, value: string): string {
-  return `${type}=${value}`;
-}
 
 function normalizeGeneratedSelector(value: string): string {
   return /^(?:text|role|css|label|placeholder)=/i.test(value) ? value : `text=${value}`;
@@ -485,7 +471,7 @@ function ScenarioBuilder({
           step.type === "FILL" ||
           step.type === "WAIT_FOR_ELEMENT" ||
           step.type === "ASSERT_VISIBLE") &&
-        !selectorValueFromValue(step.selector).trim()
+        !parseSelectorEditor(step.selector).value.trim()
       )
         return "Selectors must not be blank.";
       if (
@@ -872,9 +858,20 @@ function StepEditor({
       />
     </label>
   );
-  const selectorField = (label: string, value: string, change: (value: string) => void) => {
-    const selectorType = selectorTypeFromValue(value);
-    const selectorValue = selectorValueFromValue(value);
+  const selector = "selector" in step ? step.selector : "";
+  const [selectorEditor, setSelectorEditor] = useState<SelectorEditorState>(() =>
+    parseSelectorEditor(selector),
+  );
+  useEffect(() => {
+    setSelectorEditor(parseSelectorEditor(selector));
+  }, [selector]);
+  const updateSelectorEditor = (next: SelectorEditorState) => {
+    setSelectorEditor(next);
+    if ("selector" in step)
+      onChange({ ...step, selector: serializeSelectorEditor(next) });
+  };
+  const selectorField = (label: string) => {
+    const { type: selectorType, value: selectorValue } = selectorEditor;
     return (
       <div className="text-xs font-medium">
         <div className="grid gap-2 sm:grid-cols-[10rem_1fr]">
@@ -883,7 +880,12 @@ function StepEditor({
             <select
               disabled={disabled}
               value={selectorType}
-              onChange={(event) => change(formatSelector(event.target.value as SelectorType, selectorValue))}
+              onChange={(event) =>
+                updateSelectorEditor({
+                  type: event.target.value as SelectorEditorType,
+                  value: selectorValue,
+                })
+              }
               className={`${inputClass} mt-1 disabled:opacity-60`}
               aria-label={`${label} selector type`}
             >
@@ -900,15 +902,23 @@ function StepEditor({
               disabled={disabled}
               type="text"
               value={selectorValue}
-              onChange={(event) => change(formatSelector(selectorType, event.target.value))}
-              placeholder={selectorType === "role" ? "link|About" : selectorType === "css" ? "button.submit" : "About"}
+              onChange={(event) =>
+                updateSelectorEditor({ type: selectorType, value: event.target.value })
+              }
+              placeholder={
+                selectorType === "role"
+                  ? "link|About"
+                  : selectorType === "css"
+                    ? "button.submit"
+                    : "About"
+              }
               className={`${inputClass} mt-1 font-mono disabled:opacity-60`}
               aria-label={`${label} target value`}
             />
           </label>
         </div>
         <p className="mt-1 text-[11px] font-normal text-muted-foreground">
-          Saved as <code>{formatSelector(selectorType, selectorValue || "…")}</code>
+          Saved as <code>{serializeSelectorEditor({ type: selectorType, value: selectorValue || "…" })}</code>
         </p>
       </div>
     );
@@ -960,14 +970,10 @@ function StepEditor({
             (value) => onChange({ ...step, path: value }),
           )}
         {(step.type === "CLICK" || step.type === "ASSERT_VISIBLE") &&
-          selectorField("Element selector", step.selector, (value) =>
-            onChange({ ...step, selector: value }),
-          )}
+          selectorField("Element selector")}
         {step.type === "FILL" && (
           <>
-            {selectorField("Element selector", step.selector, (value) =>
-              onChange({ ...step, selector: value }),
-            )}
+            {selectorField("Element selector")}
             <label className="relative text-xs font-medium">
               <span className="flex items-center justify-between gap-2">
                 <span>Text</span>
@@ -1087,9 +1093,7 @@ function StepEditor({
         )}
         {step.type === "WAIT_FOR_ELEMENT" && (
           <>
-            {selectorField("Element selector", step.selector, (value) =>
-              onChange({ ...step, selector: value }),
-            )}
+            {selectorField("Element selector")}
             {field(
               "Timeout (ms)",
               step.timeoutMs,
