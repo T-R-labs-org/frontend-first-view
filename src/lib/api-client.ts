@@ -3336,6 +3336,25 @@ export const v2Api = {
       body: JSON.stringify(data),
       requiresAuth: true,
     }),
+  updateDependency: (
+    dependencyId: string,
+    data: {
+      name?: string;
+      kind?: V2DependencyKind;
+      checkPath?: string;
+      expectedStatus?: number;
+    },
+  ): Promise<V2EnvironmentDependency> =>
+    apiRequest(`/environment-dependencies/${encodeURIComponent(dependencyId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+      requiresAuth: true,
+    }),
+  deleteDependency: (dependencyId: string): Promise<{ id: string; deleted: true }> =>
+    apiRequest(`/environment-dependencies/${encodeURIComponent(dependencyId)}`, {
+      method: "DELETE",
+      requiresAuth: true,
+    }),
   checkDependency: (
     dependencyId: string,
   ): Promise<{
