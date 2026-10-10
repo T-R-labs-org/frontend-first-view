@@ -51,7 +51,7 @@ interface RequestOptions extends RequestInit {
   timeoutMs?: number;
 }
 
-const DEFAULT_API_TIMEOUT_MS = 30_000;
+const DEFAULT_API_TIMEOUT_MS = 90_000;
 const QUICK_SCAN_TIMEOUT_MS = 120_000;
 const PLAN_PREPARATION_TIMEOUT_MS = 120_000;
 
