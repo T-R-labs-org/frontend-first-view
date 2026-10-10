@@ -3613,6 +3613,7 @@ export const v2Api = {
 
 export type ScenarioStep =
   | { type: "NAVIGATE"; path: string }
+  | { type: "SCROLL_TO_ELEMENT"; selector: string }
   | { type: "CLICK"; selector: string }
   | { type: "FILL"; selector: string; text: string }
   | { type: "WAIT_FOR_ELEMENT"; selector: string; timeoutMs: number }

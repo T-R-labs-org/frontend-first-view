@@ -49,6 +49,7 @@ const SCHEMA = {
 };
 const labels: Record<ScenarioStep["type"], string> = {
   NAVIGATE: "Navigate",
+  SCROLL_TO_ELEMENT: "Scroll to Element",
   CLICK: "Click",
   FILL: "Fill",
   WAIT_FOR_ELEMENT: "Wait for Element",
@@ -77,7 +78,7 @@ function normalizeGeneratedSelector(value: string): string {
 
 function normalizeGeneratedSteps(steps: ScenarioStep[]): ScenarioStep[] {
   return steps.map((step) =>
-    step.type === "CLICK" || step.type === "FILL" || step.type === "WAIT_FOR_ELEMENT" || step.type === "ASSERT_VISIBLE"
+    step.type === "SCROLL_TO_ELEMENT" || step.type === "CLICK" || step.type === "FILL" || step.type === "WAIT_FOR_ELEMENT" || step.type === "ASSERT_VISIBLE"
       ? { ...step, selector: normalizeGeneratedSelector(step.selector) }
       : step,
   );
@@ -94,7 +95,7 @@ function isScenarioStep(value: unknown): value is ScenarioStep {
     return (
       typeof item.path === "string" && item.path.startsWith("/") && !item.path.startsWith("//")
     );
-  if (item.type === "CLICK" || item.type === "ASSERT_VISIBLE")
+  if (item.type === "SCROLL_TO_ELEMENT" || item.type === "CLICK" || item.type === "ASSERT_VISIBLE")
     return typeof item.selector === "string" && item.selector.trim().length > 0;
   if (item.type === "FILL")
     return (
@@ -103,12 +104,12 @@ function isScenarioStep(value: unknown): value is ScenarioStep {
       typeof item.text === "string"
     );
   return (
-    item.type === "WAIT_FOR_ELEMENT" &&
-    typeof item.selector === "string" &&
-    item.selector.trim().length > 0 &&
-    Number.isInteger(item.timeoutMs) &&
-    Number(item.timeoutMs) >= 1 &&
-    Number(item.timeoutMs) <= 120000
+    (item.type === "WAIT_FOR_ELEMENT" &&
+      typeof item.selector === "string" &&
+      item.selector.trim().length > 0 &&
+      Number.isInteger(item.timeoutMs) &&
+      Number(item.timeoutMs) >= 1 &&
+      Number(item.timeoutMs) <= 120000)
   );
 }
 function isScenarioStepList(value: unknown): value is ScenarioStep[] {
@@ -467,7 +468,8 @@ function ScenarioBuilder({
       )
         return "Paths must be relative and begin with /.";
       if (
-        (step.type === "CLICK" ||
+        (step.type === "SCROLL_TO_ELEMENT" ||
+          step.type === "CLICK" ||
           step.type === "FILL" ||
           step.type === "WAIT_FOR_ELEMENT" ||
           step.type === "ASSERT_VISIBLE") &&
@@ -940,9 +942,9 @@ function StepEditor({
                 ? { type, path: "/" }
                 : type === "FILL"
                   ? { type, selector: "", text: "" }
-                  : type === "WAIT_FOR_ELEMENT"
-                    ? { type, selector: "", timeoutMs: 5000 }
-                    : { type, selector: "" },
+                : type === "WAIT_FOR_ELEMENT"
+                  ? { type, selector: "", timeoutMs: 5000 }
+                  : { type, selector: "" },
             );
           }}
           className="ml-2 rounded-md border border-border bg-surface-2 px-2 py-1.5 text-sm disabled:opacity-60"
@@ -969,8 +971,13 @@ function StepEditor({
             step.path,
             (value) => onChange({ ...step, path: value }),
           )}
-        {(step.type === "CLICK" || step.type === "ASSERT_VISIBLE") &&
+        {(step.type === "SCROLL_TO_ELEMENT" || step.type === "CLICK" || step.type === "ASSERT_VISIBLE") &&
           selectorField("Element selector")}
+        {step.type === "SCROLL_TO_ELEMENT" && (
+          <p className="text-[11px] text-muted-foreground md:col-span-2">
+            Scrolls the target into view before the next step. Use this for lazy-loaded or scroll-triggered content.
+          </p>
+        )}
         {step.type === "FILL" && (
           <>
             {selectorField("Element selector")}
