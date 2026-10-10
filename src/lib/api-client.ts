@@ -710,6 +710,13 @@ export interface ProjectRole {
   createdAt?: string;
   updatedAt?: string;
 }
+export type RunScenarioChoiceSource = "CATALOG" | "SYSTEM";
+export interface RunScenarioChoice {
+  id: string;
+  name: string;
+  detail?: string;
+  source: RunScenarioChoiceSource;
+}
 export interface V2TestDataFixture {
   id: string;
   organizationId: string;
@@ -3192,6 +3199,11 @@ export interface CustomerWorkerPoolHealth {
 }
 
 export const v2Api = {
+  listViewports: (mode: V2PlannerMode = "QUICK_SMOKE"): Promise<V2Viewport[]> =>
+    apiRequest(`/viewports?mode=${encodeURIComponent(mode)}`, {
+      requiresAuth: true,
+      cache: "no-store",
+    }),
   listRoles: (projectId: string, environmentId: string): Promise<ProjectRole[]> =>
     apiRequest(
       `/roles/project/${encodeURIComponent(projectId)}/environment/${encodeURIComponent(environmentId)}`,

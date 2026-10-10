@@ -26,6 +26,10 @@ import {
   normalizeV2PlannerMode,
   type V2PlannerMode,
   type V2TestPlan,
+  type ProjectRole,
+  type ScenarioCatalogItem,
+  type V2Viewport,
+  scenariosApi,
 } from "@/lib/api-client";
 import {
   RunConfigurationPanel,
@@ -86,6 +90,11 @@ export function V2RunPreflight({
   const [fixtures, setFixtures] = useState<V2TestDataFixture[]>([]);
   const [environmentId, setEnvironmentId] = useState("");
   const [fixtureId, setFixtureId] = useState("");
+  const [catalogScenarios, setCatalogScenarios] = useState<ScenarioCatalogItem[]>([]);
+  const [projectRoles, setProjectRoles] = useState<ProjectRole[]>([]);
+  const [viewportOptions, setViewportOptions] = useState<V2Viewport[]>([]);
+  const [configurationLoading, setConfigurationLoading] = useState(false);
+  const [configurationError, setConfigurationError] = useState<string | null>(null);
   const [mode, setMode] = useState<V2PlannerMode>("QUICK_SMOKE");
   const [planName, setPlanName] = useState("Fresh adaptive smoke plan");
   const [enableVision, setEnableVision] = useState(false);
@@ -156,6 +165,42 @@ export function V2RunPreflight({
     };
   }, [selectedProject.id]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setConfigurationLoading(true);
+    setConfigurationError(null);
+    setCatalogScenarios([]);
+    setProjectRoles([]);
+    setViewportOptions([]);
+    Promise.all([
+      scenariosApi.list(selectedProject.id),
+      v2Api.listViewports(mode),
+      environmentId
+        ? v2Api.listRoles(selectedProject.id, environmentId)
+        : Promise.resolve([] as ProjectRole[]),
+    ])
+      .then(([scenarios, viewports, roles]) => {
+        if (cancelled) return;
+        setCatalogScenarios(
+          scenarios.filter((scenario) => scenario.isVerified && scenario.steps.length > 0),
+        );
+        setViewportOptions(viewports);
+        setProjectRoles(roles);
+      })
+      .catch((cause) => {
+        if (!cancelled)
+          setConfigurationError(
+            cause instanceof Error ? cause.message : "Unable to load run configuration metadata.",
+          );
+      })
+      .finally(() => {
+        if (!cancelled) setConfigurationLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [environmentId, mode, selectedProject.id]);
+
   const blockedPolicies = useMemo(
     () =>
       plan?.policyDecisions.filter(
@@ -165,7 +210,11 @@ export function V2RunPreflight({
   );
   const aiPlan = plan?.projectMap?.aiPlan;
   const selectedViewports =
-    plan?.projectMap?.viewportMatrix ?? plan?.projectMap?.billingBreakdown?.viewportMatrix ?? [];
+    viewportOptions.length > 0
+      ? viewportOptions
+      : (plan?.projectMap?.viewportMatrix ??
+        plan?.projectMap?.billingBreakdown?.viewportMatrix ??
+        []);
   const readyToStart = Boolean(
     plan &&
     plan.status !== "FAILED" &&
@@ -243,14 +292,17 @@ export function V2RunPreflight({
   };
 
   const defaultMatrixSelection = (candidate: V2TestPlan): MatrixSelection => ({
-    scenarioIds: candidate.scenarios.slice(0, 2).map((scenario) => scenario.id),
-    viewportIds: (
-      candidate.projectMap?.viewportMatrix ??
-      candidate.projectMap?.billingBreakdown?.viewportMatrix ??
-      []
-    ).map((viewport) => viewport.id),
+    scenarioIds: catalogScenarios.length
+      ? catalogScenarios.slice(0, 2).map((scenario) => scenario.id)
+      : candidate.scenarios.slice(0, 2).map((scenario) => scenario.id),
+    viewportIds: selectedViewports.map((viewport) => viewport.id),
     networkProfiles: ["FAST"],
-    roleIds: ["guest"],
+    roleIds: (projectRoles.filter((role) => role.roleType === "GUEST").length
+      ? projectRoles.filter((role) => role.roleType === "GUEST")
+      : projectRoles
+    )
+      .slice(0, 1)
+      .map((role) => role.id),
   });
 
   const start = async (payload: TriggerRunPayload, planOverride?: V2TestPlan) => {
@@ -675,10 +727,24 @@ export function V2RunPreflight({
               <RunConfigurationPanel
                 projectId={selectedProject.id}
                 environmentId={environmentId}
-                scenarios={plan.scenarios}
+                catalogScenarios={catalogScenarios.map((scenario) => ({
+                  id: scenario.id,
+                  name: scenario.name,
+                  detail: scenario.description || `${scenario.steps.length} saved steps`,
+                  source: "CATALOG" as const,
+                }))}
+                systemScenarios={plan.scenarios.map((scenario) => ({
+                  id: scenario.id,
+                  name: scenario.name,
+                  detail: scenario.expectedOutcome,
+                  source: "SYSTEM" as const,
+                }))}
                 viewports={selectedViewports}
+                roles={projectRoles}
                 planLimit={2}
                 busy={busy || waitingForProvider || !readyToStart}
+                metadataLoading={configurationLoading}
+                metadataError={configurationError}
                 error={error}
                 onStart={(payload) => void start(payload)}
               />
