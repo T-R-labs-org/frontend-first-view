@@ -57,6 +57,45 @@ const toMessage = (cause: unknown, fallback: string) =>
   cause instanceof Error ? cause.message : fallback;
 const DYNAMIC_VARIABLES = ["{{DYNAMIC_EMAIL}}", "{{DYNAMIC_FIRST_NAME}}", "{{DYNAMIC_LAST_NAME}}"];
 const SECRET_TOKEN_PATTERN = /\{\{(SECRET_[A-Z0-9_]+)\}\}/g;
+type SelectorType = "text" | "role" | "css" | "label" | "placeholder";
+const selectorTypeLabels: Record<SelectorType, string> = {
+  text: "Text",
+  role: "Role",
+  css: "CSS",
+  label: "Label",
+  placeholder: "Placeholder",
+};
+
+function selectorTypeFromValue(value: string): SelectorType {
+  const prefix = value.match(/^(text|role|css|label|placeholder)=/i)?.[1]?.toLowerCase();
+  return prefix && prefix in selectorTypeLabels
+    ? (prefix as SelectorType)
+    : value.trim()
+      ? "css"
+      : "text";
+}
+
+function selectorValueFromValue(value: string): string {
+  return /^(?:text|role|css|label|placeholder)=/i.test(value)
+    ? value.slice(value.indexOf("=") + 1)
+    : value;
+}
+
+function formatSelector(type: SelectorType, value: string): string {
+  return `${type}=${value}`;
+}
+
+function normalizeGeneratedSelector(value: string): string {
+  return /^(?:text|role|css|label|placeholder)=/i.test(value) ? value : `text=${value}`;
+}
+
+function normalizeGeneratedSteps(steps: ScenarioStep[]): ScenarioStep[] {
+  return steps.map((step) =>
+    step.type === "CLICK" || step.type === "FILL" || step.type === "WAIT_FOR_ELEMENT" || step.type === "ASSERT_VISIBLE"
+      ? { ...step, selector: normalizeGeneratedSelector(step.selector) }
+      : step,
+  );
+}
 
 function secretKeysIn(value: string): string[] {
   return Array.from(value.matchAll(SECRET_TOKEN_PATTERN), (match) => match[1]);
@@ -446,7 +485,7 @@ function ScenarioBuilder({
           step.type === "FILL" ||
           step.type === "WAIT_FOR_ELEMENT" ||
           step.type === "ASSERT_VISIBLE") &&
-        !step.selector.trim()
+        !selectorValueFromValue(step.selector).trim()
       )
         return "Selectors must not be blank.";
       if (
@@ -473,11 +512,14 @@ function ScenarioBuilder({
     setError(null);
     try {
       const result = await scenariosApi.generate(projectId, { projectId, prompt: prompt.trim() });
-      if (!isScenarioStepList(result.steps))
+      const generatedSteps = isScenarioStepList(result.steps)
+        ? normalizeGeneratedSteps(result.steps)
+        : null;
+      if (!generatedSteps)
         throw new Error("The AI returned unsupported scenario steps. Nothing was changed.");
       setDiscoveryMapMissing(result.discoveryMapMissing);
       setVerification(null);
-      setDraft((current) => ({ ...current, steps: result.steps }));
+      setDraft((current) => ({ ...current, steps: generatedSteps }));
       setShowGenerator(false);
       setPrompt("");
     } catch (cause) {
@@ -830,6 +872,47 @@ function StepEditor({
       />
     </label>
   );
+  const selectorField = (label: string, value: string, change: (value: string) => void) => {
+    const selectorType = selectorTypeFromValue(value);
+    const selectorValue = selectorValueFromValue(value);
+    return (
+      <div className="text-xs font-medium">
+        <div className="grid gap-2 sm:grid-cols-[10rem_1fr]">
+          <label>
+            Selector Type
+            <select
+              disabled={disabled}
+              value={selectorType}
+              onChange={(event) => change(formatSelector(event.target.value as SelectorType, selectorValue))}
+              className={`${inputClass} mt-1 disabled:opacity-60`}
+              aria-label={`${label} selector type`}
+            >
+              {Object.entries(selectorTypeLabels).map(([type, typeLabel]) => (
+                <option key={type} value={type}>
+                  {typeLabel}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            {label}
+            <input
+              disabled={disabled}
+              type="text"
+              value={selectorValue}
+              onChange={(event) => change(formatSelector(selectorType, event.target.value))}
+              placeholder={selectorType === "role" ? "link|About" : selectorType === "css" ? "button.submit" : "About"}
+              className={`${inputClass} mt-1 font-mono disabled:opacity-60`}
+              aria-label={label}
+            />
+          </label>
+        </div>
+        <p className="mt-1 text-[11px] font-normal text-muted-foreground">
+          Saved as <code>{formatSelector(selectorType, selectorValue || "…")}</code>
+        </p>
+      </div>
+    );
+  };
   return (
     <div className="rounded-md border border-border bg-surface-2/30 p-3">
       <div className="flex items-center gap-2">
@@ -877,12 +960,12 @@ function StepEditor({
             (value) => onChange({ ...step, path: value }),
           )}
         {(step.type === "CLICK" || step.type === "ASSERT_VISIBLE") &&
-          field("Element selector", step.selector, (value) =>
+          selectorField("Element selector", step.selector, (value) =>
             onChange({ ...step, selector: value }),
           )}
         {step.type === "FILL" && (
           <>
-            {field("Element selector", step.selector, (value) =>
+            {selectorField("Element selector", step.selector, (value) =>
               onChange({ ...step, selector: value }),
             )}
             <label className="relative text-xs font-medium">
@@ -1004,7 +1087,7 @@ function StepEditor({
         )}
         {step.type === "WAIT_FOR_ELEMENT" && (
           <>
-            {field("Element selector", step.selector, (value) =>
+            {selectorField("Element selector", step.selector, (value) =>
               onChange({ ...step, selector: value }),
             )}
             {field(
