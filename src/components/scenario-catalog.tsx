@@ -895,7 +895,7 @@ function StepEditor({
             </select>
           </label>
           <label>
-            {label}
+            Target Value
             <input
               disabled={disabled}
               type="text"
@@ -903,7 +903,7 @@ function StepEditor({
               onChange={(event) => change(formatSelector(selectorType, event.target.value))}
               placeholder={selectorType === "role" ? "link|About" : selectorType === "css" ? "button.submit" : "About"}
               className={`${inputClass} mt-1 font-mono disabled:opacity-60`}
-              aria-label={label}
+              aria-label={`${label} target value`}
             />
           </label>
         </div>
