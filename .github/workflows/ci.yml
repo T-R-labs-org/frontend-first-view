@@ -45,7 +45,11 @@ jobs:
         run: pnpm build 2>&1 | tee frontend-build.log
 
       - name: Verify Matrix QA brand assets
+        # Keep verification proof handoff covered alongside the catalog UI.
         run: pnpm verify:brand 2>&1 | tee frontend-brand.log
+
+      - name: Test scenario verification proof handoff
+        run: node --experimental-strip-types scripts/test-scenario-verification.mjs
 
       - name: Test screenshot evidence presentation states
         run: pnpm test:screenshot-evidence 2>&1 | tee screenshot-evidence-test.log
