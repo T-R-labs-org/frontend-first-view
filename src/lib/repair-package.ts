@@ -24,9 +24,45 @@ export interface RepairPackageInput {
   diagnostic?: string | null;
 }
 
+const EXPORT_BLOCKED = "Repair export withheld: sensitive content could not be safely removed.";
+const SENSITIVE_KEY = "(?:authorization|proxy-authorization|cookie|set-cookie|password|passwd|secret|client[_-]?secret|access[_-]?token|refresh[_-]?token|token|api[_-]?key|credential|session[_-]?id|x-[a-z0-9_-]+)";
+
+/** Apply at the export boundary even when upstream evidence was already redacted. */
+export function sanitizeRepairText(value: string): string {
+  if (value.length > 100_000) throw new Error(EXPORT_BLOCKED);
+  let result = value.replace(/[\u200B-\u200D\u2060\uFEFF]/g, "");
+  result = result.replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[redacted private key]");
+  result = result.replace(/https?:\/\/[^\s<>"'`]+/gi, (raw) => {
+    try {
+      const url = new URL(raw);
+      if ([...url.searchParams.keys()].some((key) => /^(?:x-amz-|x-goog-|signature$|sig$|expires$|awsaccesskeyid$)/i.test(key))) {
+        return "[protected artifact URL omitted]";
+      }
+      url.username = "";
+      url.password = "";
+      url.search = "";
+      url.hash = "";
+      return url.toString();
+    } catch {
+      throw new Error(EXPORT_BLOCKED);
+    }
+  });
+  result = result.replace(/\bdata:[^\s]+/gi, "[inline data omitted]");
+  result = result.replace(/("headers?"\s*:\s*)\{[^{}]*\}/gi, '$1"[redacted]"');
+  result = result.replace(new RegExp(`(["']${SENSITIVE_KEY}["']\\s*:\\s*)("(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*')`, "gi"), '$1"[redacted]"');
+  result = result.replace(/\b(?:cookie|set-cookie)\s*:[^\r\n]+/gi, "Cookie: [redacted]");
+  result = result.replace(/^(\s*x-[a-z0-9_-]+\s*:\s*)[^\r\n]+/gim, "$1[redacted]");
+  result = result.replace(new RegExp(`(\\b${SENSITIVE_KEY}\\s*[:=]\\s*)(?:Bearer\\s+|Basic\\s+)?[^\\s,;\\"'&<>]+`, "gi"), "$1[redacted]");
+  result = result.replace(/\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "[redacted authorization]");
+  result = result.replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[redacted token]");
+  // Incomplete key blocks and nested header payloads cannot be safely exported.
+  if (/-----BEGIN [A-Z ]*PRIVATE KEY-----|"headers?"\s*:\s*\{|\b(?:javascript|file):/i.test(result)) throw new Error(EXPORT_BLOCKED);
+  return result;
+}
+
 const compact = (value: unknown, fallback = "—") => {
   if (typeof value !== "string") return fallback;
-  const normalized = value.replace(/\s+/g, " ").trim();
+  const normalized = sanitizeRepairText(value).replace(/\s+/g, " ").trim();
   return normalized || fallback;
 };
 
@@ -83,7 +119,7 @@ export function buildRepairPackage(input: RepairPackageInput): string {
     .map((line) => `- ${line}`)
     .join("\n");
 
-  return [
+  const markdown = [
     "# Matrix QA Repair Package",
     "",
     `Prepared for: ${input.target}`,
@@ -129,6 +165,16 @@ export function buildRepairPackage(input: RepairPackageInput): string {
     compact(input.diagnostic ?? "", "None"),
     "",
   ].join("\n");
+  // Verify the finished payload as well, so future fields cannot bypass the guard.
+  return sanitizeRepairText(markdown);
+}
+
+export function tryBuildRepairPackage(input: RepairPackageInput): { markdown: string; error: string | null } {
+  try {
+    return { markdown: buildRepairPackage(input), error: null };
+  } catch {
+    return { markdown: "", error: EXPORT_BLOCKED };
+  }
 }
 
 export function repairPackageFilename(runLabel: string, target: RepairPackageTarget): string {
