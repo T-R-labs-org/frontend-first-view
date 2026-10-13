@@ -24,6 +24,7 @@ import {
   type ScenarioStep,
 } from "@/lib/api-client";
 import { useLivePortfolio } from "@/lib/live-data";
+import { verifiedScenarioPayload } from '@/lib/scenario-verification-proof';
 import {
   parseSelectorEditor,
   serializeSelectorEditor,
@@ -396,6 +397,9 @@ function ScenarioBuilder({
     status: "queued" | "passed" | "failed";
     results: Array<{ index: number; status: "passed" | "failed"; error?: string }>;
     error: string | null;
+    jobId?: string;
+    environmentId?: string;
+    stepsSnapshot?: string;
   } | null>(null);
   const [verifying, setVerifying] = useState(false);
   const payload = useMemo(
@@ -540,6 +544,9 @@ function ScenarioBuilder({
         status: completed.status,
         results: completed.results,
         error: completed.error,
+        jobId: completed.jobId,
+        environmentId: activeEnvironmentId || undefined,
+        stepsSnapshot: JSON.stringify(draft.steps),
       });
       if (completed.status !== "passed")
         setError(
@@ -573,10 +580,7 @@ function ScenarioBuilder({
     setSaving(true);
     setError(null);
     try {
-      const savePayload = {
-        ...payload,
-        ...(verification?.status === "passed" ? { isVerified: true } : {}),
-      };
+      const savePayload = verifiedScenarioPayload(payload, verification, activeEnvironmentId || undefined);
       onCreated(
         initialItem
           ? await scenariosApi.update(projectId, initialItem.id, savePayload)

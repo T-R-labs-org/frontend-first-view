@@ -3656,6 +3656,7 @@ export interface CreateScenarioPayload {
   description?: string;
   steps: ScenarioStep[];
   isVerified?: boolean;
+  verificationJobId?: string;
 }
 export interface ScenarioCatalogItem {
   id: string;
