@@ -5,7 +5,7 @@ import { formatLiveDate, formatLiveDuration, reportForRun, runNumber, useLivePor
 import { videoEvidenceEnabled } from "@/lib/feature-flags";
 import { IssueDetailView } from "@/components/issue-detail-view";
 import { normalizeReport, type ReportIssue } from "@/lib/report-model";
-import { buildRepairPackage, repairPackageFilename, type RepairPackageTarget } from "@/lib/repair-package";
+import { tryBuildRepairPackage, repairPackageFilename, type RepairPackageTarget } from "@/lib/repair-package";
 
 export const Route = createFileRoute("/app/reports")({
   head: () => ({ meta: [{ title: "Reports · Matrix QA" }, { name: "robots", content: "noindex" }] }),
@@ -29,8 +29,8 @@ function ReportsPage() {
   const normalized = useMemo(() => selectedRun && report ? normalizeReport(selectedRun, report) : null, [selectedRun, report]);
   const quickScanFindings = (report?.quickScanHandoff?.findings ?? []).filter((finding) => finding.status === "QUICK_SCAN_CONFIRMED" || (finding.status === "CONFIRMED" && finding.reportSection !== "VISUAL_INTERACTIVE_FINDINGS"));
   const visualFindings = Array.isArray(report?.aiOverview?.findings) ? report.aiOverview.findings : [];
-  const repairMarkdown = report && selectedRun
-    ? buildRepairPackage({
+  const repairExport = report && selectedRun
+    ? tryBuildRepairPackage({
         target,
         runLabel: runNumber(live.runs, selectedRun.id),
         status: report.status,
@@ -61,10 +61,11 @@ function ReportsPage() {
         })),
         diagnostic: report.errorMessage,
       })
-    : "No terminal report is available yet.";
+    : { markdown: "", error: "No terminal report is available yet." };
+  const repairMarkdown = repairExport.markdown;
 
   const downloadRepairPackage = () => {
-    if (!report || !selectedRun || typeof window === "undefined") return;
+    if (!report || !selectedRun || repairExport.error || typeof window === "undefined") return;
     const blob = new Blob([repairMarkdown], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -144,10 +145,10 @@ function ReportsPage() {
                 <section className="surface-card sticky top-4 flex h-fit flex-col overflow-hidden">
                   <header className="border-b border-border px-5 py-3"><h2 className="font-display text-sm font-semibold">Evidence package</h2><p className="text-[11px] text-muted-foreground">Live backend artifact links and repair notes</p></header>
                   <div className="flex gap-1 border-b border-border bg-surface-2/40 p-1">{(["Cursor", "Claude Code", "GitHub", "Raw"] as const).map((item) => <button key={item} onClick={() => setTarget(item)} className={`flex-1 rounded px-2 py-1 text-xs font-medium ${target === item ? "bg-primary/15 text-foreground" : "text-muted-foreground"}`}>{item}</button>)}</div>
-                  <pre className="max-h-[360px] overflow-auto whitespace-pre-wrap px-5 py-4 font-mono text-[11px] leading-relaxed">{repairMarkdown}</pre>
+                  <pre className="max-h-[360px] overflow-auto whitespace-pre-wrap px-5 py-4 font-mono text-[11px] leading-relaxed">{repairExport.error ?? repairMarkdown}</pre>
                   <div className="flex flex-wrap items-center gap-2 border-t border-border bg-surface-2/40 px-5 py-3">
-                    <button onClick={() => navigator.clipboard?.writeText(repairMarkdown)} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground"><Copy className="h-3.5 w-3.5" /> Copy markdown</button>
-                    <button onClick={downloadRepairPackage} className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-semibold"><Download className="h-3.5 w-3.5" /> Download repair package</button>
+                    <button disabled={Boolean(repairExport.error)} onClick={() => { if (!repairExport.error) void navigator.clipboard?.writeText(repairMarkdown); }} className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground disabled:opacity-50"><Copy className="h-3.5 w-3.5" /> Copy markdown</button>
+                    <button disabled={Boolean(repairExport.error)} onClick={downloadRepairPackage} className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-xs font-semibold disabled:opacity-50"><Download className="h-3.5 w-3.5" /> Download repair package</button>
                     {!videoEvidenceEnabled && <span className="text-[11px] text-muted-foreground">Screenshot-first evidence · screenshots and report retained</span>}
                     {videoEvidenceEnabled && videoStatus !== "ready" && videoStatus !== "raw_only" && <span className="text-[11px] text-warning">Video unavailable; run evidence is still retained</span>}
                     {typeof report.reportUrl === "string" && report.reportUrl && <a href={report.reportUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-primary"><Download className="h-3 w-3" /> report.md</a>}
