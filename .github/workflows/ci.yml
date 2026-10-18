@@ -35,6 +35,11 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - name: Reject tracked runtime env files
+        run: |
+          node scripts/check-env-files.mjs
+          node --test scripts/check-env-files.test.mjs
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
 
